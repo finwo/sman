@@ -1,0 +1,5 @@
+[main]
+destdir       = ./test
+
+[repository]
+default = https://github.com/finwo/sman-repository/archive/master.tar.gz

@@ -5,32 +5,12 @@
 #include "argparse.h"
 #include "ini.h"
 
-#ifndef NULL
-#define NULL ((void*)0)
-#endif
-
-#ifndef MIN
-#define MIN(a,b) ((a<b)?a:b)
-#endif
-#ifndef MAX
-#define MAX(a,b) ((a>b)?a:b)
-#endif
+#include "common.h"
+#include "commands.h"
 
 /* #ifdef __cplusplus */
 /* extern "C" { */
 /* #endif */
-
-struct repository {
-  void *next;
-  const char *name;
-  const char *location;
-};
-
-struct configuration {
-  const char *worldfile;
-  const char *repodir;
-  struct repository *repo;
-};
 
 // Which configs to load
 const char *configs[] = {
@@ -48,13 +28,6 @@ const char *usage[] = {
   NULL,
 };
 
-static int commandAdd(int argc, const char **argv, struct configuration *config) {
-  printf("Argc: %d\n", argc);
-  for(int i=0; i<argc; i++) {
-    printf("argument: %s\n", argv[i]);
-  }
-  return 0;
-}
 
 // Which commands we have available
 // fn(argc, argv, config)
@@ -63,9 +36,23 @@ struct {
   char *description;
   int (*fn)(int,const char**,struct configuration *);
 } commands[] = {
-  { "add", "Add a package to the world set and install it", commandAdd },
+  { "add"      , "Add a package to the world set and install it"       , commandAdd       },
+  { "install"  , "Install a package without adding it to the world set", commandInstall   },
+  { "update"   , "Fetch repository updates"                            , commandUpdate    },
+  { "bootstrap", "Bootstrap directory for use with sman"               , commandBootstrap },
   NULL,
 };
+
+int spawn(const char *command, char *argv[]) {
+  int cpid = fork();
+  if (!cpid) {
+    return execvp(command, argv);
+  }
+  if (cpid < 0) {
+    return 1;
+  }
+  return waitpid(cpid, NULL, 0);
+}
 
 // Handle config entries
 static int configHandler(void *user, const char *section, const char *name, const char *value) {
@@ -75,7 +62,17 @@ static int configHandler(void *user, const char *section, const char *name, cons
   // Change worldfile
   if (strcmp(section, "main") == 0) {
     if (strcmp(name, "worldfile") == 0) {
+      free(config->worldfile);
       config->worldfile = strdup(value);
+    } else if (strcmp(name, "repodir") == 0) {
+      free(config->repodir);
+      config->repodir = strdup(value);
+    } else if (strcmp(name, "installedfile") == 0) {
+      free(config->installedfile);
+      config->installedfile = strdup(value);
+    } else if (strcmp(name, "destdir") == 0) {
+      free(config->destdir);
+      config->destdir = strdup(value);
     }
   }
 
@@ -94,17 +91,20 @@ static int configHandler(void *user, const char *section, const char *name, cons
 
 int main(int argc, const char **argv) {
   int i;
+  char *tmp;
   const char *command = NULL;
   struct configuration config;
   config.repo      = NULL;
-  config.worldfile = "/etc/sman/world";
-  config.repodir   = "/etc/sman/repo";
+  config.destdir       = strdup("");
+  config.installedfile = strdup("/etc/sman/installed");
+  config.worldfile     = strdup("/etc/sman/world");
+  config.repodir       = strdup("/etc/sman/repo");
 
   // Define arguments
   char *configfile = NULL;
   struct argparse_option options[] = {
     OPT_HELP(),
-    OPT_STRING('c', "config", &configfile, "Select a specific config file"),
+    OPT_STRING('c', "config", &configfile , "Select a specific config file"),
     OPT_END(),
   };
 
@@ -147,6 +147,27 @@ int main(int argc, const char **argv) {
       }
     }
   }
+
+  // Handle installedfile destdir
+  tmp = calloc(1, strlen(config.destdir) + strlen(config.installedfile) + 1);
+  strcat(tmp, config.destdir);
+  strcat(tmp, config.installedfile);
+  free(config.installedfile);
+  config.installedfile = tmp;
+
+  // Handle worldfile destdir
+  tmp = calloc(1, strlen(config.destdir) + strlen(config.worldfile) + 1);
+  strcat(tmp, config.destdir);
+  strcat(tmp, config.worldfile);
+  free(config.worldfile);
+  config.worldfile = tmp;
+
+  // Handle repodir destdir
+  tmp = calloc(1, strlen(config.destdir) + strlen(config.repodir) + 1);
+  strcat(tmp, config.destdir);
+  strcat(tmp, config.repodir);
+  free(config.repodir);
+  config.repodir = tmp;
 
   // No extra arguments = no command
   if (argc < 1) {
